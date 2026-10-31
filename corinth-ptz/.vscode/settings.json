@@ -1,0 +1,17 @@
+{
+    // Change this to the Qt version you installed (Qt Online Installer default path shown).
+    "cmake.configureSettings": {
+        "CMAKE_PREFIX_PATH": "C:/Qt/6.10.2/mingw_64",
+        // Optional: uncomment if you installed SDL2 for flight sticks / PTZ keyboards.
+        // "SDL2_DIR": "C:/SDL2/cmake",
+        "CMAKE_BUILD_TYPE": "Release"
+    },
+    "cmake.buildDirectory": "${workspaceFolder}/build",
+    "cmake.generator": "Ninja",
+    "cmake.debugConfig": {
+        "environment": [
+            { "name": "PATH", "value": "C:/Qt/6.8.3/msvc2022_64/bin;${env:PATH}" }
+        ]
+    },
+    "files.associations": { "*.qml": "qml" }
+}
