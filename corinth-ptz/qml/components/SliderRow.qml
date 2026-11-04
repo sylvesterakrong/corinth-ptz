@@ -35,6 +35,7 @@ ColumnLayout {
         stepSize: sr.stepSize
         value: sr.value
         Accessible.name: sr.label
+        focusPolicy: Qt.TabFocus   // after a drag the arrow keys must not keep moving the slider
         onMoved: sr.moved(value)
         background: Rectangle {
             x: sl.leftPadding

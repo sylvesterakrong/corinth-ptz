@@ -30,9 +30,10 @@ Rectangle {
                 readonly property bool sel: seg.current === modelData.id
                 text: modelData.label
                 implicitHeight: seg.small ? 24 : 28
-                leftPadding: 10
-                rightPadding: 10
+                leftPadding: seg.model.length > 5 ? 6 : 10
+                rightPadding: seg.model.length > 5 ? 6 : 10
                 hoverEnabled: true
+                focusPolicy: Qt.TabFocus
                 font.family: Theme.uiFont
                 font.pixelSize: 12
                 font.weight: Font.Medium

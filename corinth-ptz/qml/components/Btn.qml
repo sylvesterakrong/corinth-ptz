@@ -18,6 +18,7 @@ Button {
     leftPadding: compact ? 10 : 12
     rightPadding: compact ? 10 : 12
     hoverEnabled: true
+    focusPolicy: Qt.TabFocus   // a click must not take the keyboard away from the live view (F11, H, WASD)
     font.family: Theme.uiFont
     font.pixelSize: compact ? 12 : 13
     Accessible.name: text

@@ -24,12 +24,14 @@ ColumnLayout {
     }
     function editCamera(c) {
         startEdit({ id: c.id, name: c.name, proto: c.proto, ip: c.ip, httpPort: String(c.httpPort), rtspPort: String(c.rtspPort),
-                    mainUrl: c.mainUrl, subUrl: c.subUrl, user: c.user, pass: "", shown: c.shown, hasPassword: c.hasPassword }, true)
+                    mainUrl: c.mainUrl, subUrl: c.subUrl, flvUrl: c.flvUrl, thermalMainUrl: c.thermalMainUrl, thermalSubUrl: c.thermalSubUrl,
+                    user: c.user, pass: "", shown: c.shown, hasPassword: c.hasPassword }, true)
     }
     function editFound(item) {
         var isapi = item.protos.indexOf("ISAPI") >= 0
         startEdit({ id: "found-" + item.ip, name: item.model + " " + item.ip.split(".").pop(), proto: isapi ? "ISAPI" : "ONVIF",
-                    ip: item.ip, httpPort: "80", rtspPort: "554", mainUrl: "", subUrl: "", user: "admin", pass: "", shown: true, hasPassword: false }, false)
+                    ip: item.ip, httpPort: String(item.port || 80), rtspPort: "554", mainUrl: "", subUrl: "", thermalMainUrl: "", thermalSubUrl: "",
+                    user: isapi ? "admin" : "", pass: "", shown: true, hasPassword: false }, false)
     }
     function setF(k, v) { var n = Object.assign({}, form); n[k] = v; form = n; testState = "" }
     function payload(shown) {
@@ -59,7 +61,7 @@ ColumnLayout {
                 Lbl { text: "Saved cameras"; color: Theme.text; font.pixelSize: 13; Layout.fillWidth: true }
                 Btn {
                     variant: "ghost"; compact: true; text: "Add by URL"
-                    onClicked: panel.startEdit({ id: "", name: "", proto: "ISAPI", ip: "", httpPort: "80", rtspPort: "554", mainUrl: "", subUrl: "", user: "admin", pass: "", shown: true, hasPassword: false }, false)
+                    onClicked: panel.startEdit({ id: "", name: "", proto: "ISAPI", ip: "", httpPort: "80", rtspPort: "554", mainUrl: "", subUrl: "", thermalMainUrl: "", thermalSubUrl: "", user: "admin", pass: "", shown: true, hasPassword: false }, false)
                 }
             }
             Repeater {
@@ -82,7 +84,19 @@ ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 2
                             Text { text: modelData.name + (modelData.id === app.activeId ? "  ·  active" : ""); color: Theme.text; font.pixelSize: 13; font.weight: Font.Medium; elide: Text.ElideRight; Layout.fillWidth: true }
-                            Mono { text: (modelData.proto === "Demo" ? "Simulated" : modelData.ip) + " · " + modelData.proto + (modelData.proto !== "Demo" && !modelData.hasPassword ? " · no password set" : ""); color: Theme.text2; font.pixelSize: 11 }
+                            RowLayout {
+                                spacing: 8
+                                Mono { text: (modelData.proto === "Demo" ? "Simulated" : modelData.ip) + " · " + modelData.proto; color: Theme.text2; font.pixelSize: 11 }
+                                Rectangle {
+                                    visible: modelData.authOff
+                                    radius: 4; color: Theme.warnSoft; border.width: 1; border.color: Theme.warn
+                                    implicitWidth: authChip.implicitWidth + 12; implicitHeight: 18
+                                    Lbl { id: authChip; anchors.centerIn: parent; text: "Authentication off"; font.pixelSize: 10; color: Theme.warn }
+                                    HoverHandler { id: authHover }
+                                    ToolTip.visible: authHover.hovered
+                                    ToolTip.text: "No username or password is sent to this camera. Keep it on an isolated network."
+                                }
+                            }
                         }
                         Btn {
                             compact: true
@@ -157,12 +171,35 @@ ColumnLayout {
                     placeholder: panel.form.proto === "ONVIF" ? "Read from the camera (GetStreamUri)" : panel.form.proto === "ISAPI" ? "rtsp://IP:554/Streaming/Channels/102" : "rtsp://…"
                     onEdited: (v) => panel.setF("subUrl", v)
                 }
+                TextRow {
+                    Layout.fillWidth: true; label: "HTTP-FLV main stream URL (optional)"; value: panel.form.flvUrl || ""
+                    placeholder: "http://IP/101.flv  ·  used when Settings › App › Video prefers HTTP-FLV"
+                    onEdited: (v) => panel.setF("flvUrl", v)
+                }
+                TextRow {
+                    Layout.fillWidth: true; label: "Thermal main stream URL (optional)"; value: panel.form.thermalMainUrl || ""
+                    placeholder: panel.form.proto === "ISAPI" ? "Default: rtsp://IP:554/Streaming/Channels/201" : "rtsp://… (channel 2)"
+                    onEdited: (v) => panel.setF("thermalMainUrl", v)
+                }
+                TextRow {
+                    Layout.fillWidth: true; label: "Thermal sub stream URL (optional)"; value: panel.form.thermalSubUrl || ""
+                    placeholder: panel.form.proto === "ISAPI" ? "Default: rtsp://IP:554/Streaming/Channels/202" : "rtsp://… (channel 2)"
+                    onEdited: (v) => panel.setF("thermalSubUrl", v)
+                }
                 TextRow { Layout.fillWidth: true; label: "Username"; value: panel.form.user || ""; onEdited: (v) => panel.setF("user", v) }
                 TextRow {
                     Layout.fillWidth: true; label: "Password"; password: true; value: panel.form.pass || ""
                     placeholder: panel.isExisting && panel.form.hasPassword ? "Leave blank to keep the saved password" : ""
                     onEdited: (v) => panel.setF("pass", v)
                 }
+            }
+            Text {
+                visible: !(panel.form.user || "").length && !(panel.form.pass || "").length && !panel.form.hasPassword && panel.form.proto !== "Demo"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.warn
+                font.pixelSize: 12
+                text: "Username and password are blank: nothing is sent to the camera. Use this only when the camera's own authentication is switched off, and keep it on an isolated network."
             }
             Text {
                 Layout.fillWidth: true
@@ -226,6 +263,14 @@ ColumnLayout {
                 font.pixelSize: 12
                 lineHeight: 1.3
                 text: "ONVIF WS-Discovery from this computer. It finds cameras on the same network segment as the laptop. Discovery broadcasts do not cross Tailscale, so when you are remote, run the scan on the Jetson (see README) or add the camera by URL."
+            }
+            Text {
+                visible: discovery.adapters.length > 0
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.text2
+                font.pixelSize: 11
+                text: "Scanned through: " + discovery.adapters.join("  ·  ") + ". VPN and virtual adapters (Tailscale, VMware, Hyper-V) are skipped."
             }
             Rectangle {
                 visible: discovery.results.length === 0

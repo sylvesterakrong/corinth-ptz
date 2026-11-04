@@ -54,6 +54,10 @@ JoystickManager::JoystickManager(QObject *parent)
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");   // let Ctrl+C / window close reach Qt
     SDL_SetMainReady();
     m_sdlReady = SDL_Init(SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) == 0;
+    if (m_sdlReady) {
+        refreshDevices();
+        openSelected();
+    }
 #endif
 
     connect(m_timer, &QTimer::timeout, this, &JoystickManager::poll);
@@ -63,8 +67,7 @@ JoystickManager::JoystickManager(QObject *parent)
 JoystickManager::~JoystickManager()
 {
 #if defined(CORINTH_HAS_SDL2)
-    if (m_sdlController) SDL_GameControllerClose(static_cast<SDL_GameController *>(m_sdlController));
-    if (m_sdlJoystick) SDL_JoystickClose(static_cast<SDL_Joystick *>(m_sdlJoystick));
+    closeDevice();
     if (m_sdlReady) SDL_Quit();
 #endif
 }
@@ -191,6 +194,7 @@ void JoystickManager::load()
 {
     QSettings s;
     m_type = s.value(QStringLiteral("joystick/type"), QStringLiteral("xbox")).toString();
+    m_wantGuid = s.value(QStringLiteral("joystick/guid")).toString();
     if (!m_types.contains(m_type)) m_type = QStringLiteral("xbox");
     m_deadband = s.value(QStringLiteral("joystick/deadband"), 12).toInt();
     m_expo = s.value(QStringLiteral("joystick/expo"), 50).toInt();
@@ -209,6 +213,7 @@ void JoystickManager::save()
 {
     QSettings s;
     s.setValue(QStringLiteral("joystick/type"), m_type);
+    s.setValue(QStringLiteral("joystick/guid"), m_wantGuid);
     s.setValue(QStringLiteral("joystick/deadband"), m_deadband);
     s.setValue(QStringLiteral("joystick/expo"), m_expo);
     s.setValue(QStringLiteral("joystick/invertTilt"), m_invert);
@@ -454,6 +459,113 @@ void JoystickManager::handleInputs(const QHash<QString, bool> &now)
     }
 }
 
+void JoystickManager::selectDevice(const QString &guid)
+{
+    m_wantGuid = guid;
+    save();
+    openSelected();
+    emit devicesChanged();
+}
+
+void JoystickManager::useSuggestedType()
+{
+    const QString s = suggestedType();
+    if (!s.isEmpty())
+        setDeviceType(s);
+}
+
+// Every attached joystick, gamepad or not, with what it offers. Counts come from
+// opening each device briefly (SDL shares the handle if it is already open).
+void JoystickManager::refreshDevices()
+{
+    QVariantList list;
+#if defined(CORINTH_HAS_SDL2)
+    if (m_sdlReady) {
+        const int n = SDL_NumJoysticks();
+        for (int i = 0; i < n; ++i) {
+            char buf[40] = {0};
+            SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(i), buf, sizeof(buf));
+            const bool gamepad = SDL_IsGameController(i) == SDL_TRUE;
+            const char *nm = gamepad ? SDL_GameControllerNameForIndex(i) : SDL_JoystickNameForIndex(i);
+            QVariantMap d;
+            d[QStringLiteral("index")] = i;
+            d[QStringLiteral("guid")] = QString::fromLatin1(buf);
+            d[QStringLiteral("name")] = QString::fromUtf8(nm ? nm : "Unknown device");
+            d[QStringLiteral("gamepad")] = gamepad;
+            int axes = 0, buttons = 0, hats = 0;
+            if (SDL_Joystick *js = SDL_JoystickOpen(i)) {
+                axes = SDL_JoystickNumAxes(js);
+                buttons = SDL_JoystickNumButtons(js);
+                hats = SDL_JoystickNumHats(js);
+                SDL_JoystickClose(js);
+            }
+            d[QStringLiteral("axes")] = axes;
+            d[QStringLiteral("buttons")] = buttons;
+            d[QStringLiteral("hats")] = hats;
+            list << d;
+        }
+    }
+#endif
+    m_devices = list;
+    emit devicesChanged();
+}
+
+void JoystickManager::closeDevice()
+{
+#if defined(CORINTH_HAS_SDL2)
+    if (m_sdlController) SDL_GameControllerClose(static_cast<SDL_GameController *>(m_sdlController));
+    if (m_sdlJoystick) SDL_JoystickClose(static_cast<SDL_Joystick *>(m_sdlJoystick));
+#endif
+    m_sdlController = nullptr;
+    m_sdlJoystick = nullptr;
+    m_openInstance = -1;
+    if (!m_openGuid.isEmpty() || m_axisCount || m_buttonCount || m_hatCount) {
+        m_openGuid.clear();
+        m_axisCount = m_buttonCount = m_hatCount = 0;
+        emit deviceChanged();
+    }
+}
+
+// Opens the device the user picked (by GUID); if it is not attached, the first
+// one, without forgetting the choice, so the picked device is taken back when it
+// is plugged in again.
+void JoystickManager::openSelected()
+{
+#if defined(CORINTH_HAS_SDL2)
+    if (!m_sdlReady) return;
+    const int n = SDL_NumJoysticks();
+    int pick = -1;
+    for (int i = 0; i < n && pick < 0; ++i) {
+        char buf[40] = {0};
+        SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(i), buf, sizeof(buf));
+        if (!m_wantGuid.isEmpty() && QString::fromLatin1(buf) == m_wantGuid) pick = i;
+    }
+    if (pick < 0 && n > 0) pick = 0;
+    if (pick < 0) { closeDevice(); return; }
+    if (m_openInstance == int(SDL_JoystickGetDeviceInstanceID(pick)) && (m_sdlController || m_sdlJoystick))
+        return;   // already the open one
+
+    closeDevice();
+    SDL_Joystick *js = nullptr;
+    if (SDL_IsGameController(pick)) {
+        m_sdlController = SDL_GameControllerOpen(pick);
+        if (m_sdlController) js = SDL_GameControllerGetJoystick(static_cast<SDL_GameController *>(m_sdlController));
+    } else {
+        m_sdlJoystick = SDL_JoystickOpen(pick);
+        js = static_cast<SDL_Joystick *>(m_sdlJoystick);
+    }
+    if (!js) return;
+    char buf[40] = {0};
+    SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(pick), buf, sizeof(buf));
+    m_openGuid = QString::fromLatin1(buf);
+    m_openInstance = int(SDL_JoystickInstanceID(js));
+    m_axisCount = SDL_JoystickNumAxes(js);
+    m_buttonCount = SDL_JoystickNumButtons(js);
+    m_hatCount = SDL_JoystickNumHats(js);
+    emit deviceChanged();
+#endif
+}
+
 void JoystickManager::poll()
 {
     bool connected = false;
@@ -466,16 +578,20 @@ void JoystickManager::poll()
 
 #if defined(CORINTH_HAS_SDL2)
     if (m_sdlReady) {
+        bool listChanged = false;
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
-            if (ev.type == SDL_CONTROLLERDEVICEREMOVED || ev.type == SDL_JOYDEVICEREMOVED) {
-                if (m_sdlController) { SDL_GameControllerClose(static_cast<SDL_GameController *>(m_sdlController)); m_sdlController = nullptr; }
-                if (m_sdlJoystick) { SDL_JoystickClose(static_cast<SDL_Joystick *>(m_sdlJoystick)); m_sdlJoystick = nullptr; }
+            if (ev.type == SDL_JOYDEVICEADDED) {
+                listChanged = true;
+            } else if (ev.type == SDL_JOYDEVICEREMOVED) {
+                listChanged = true;
+                if (int(ev.jdevice.which) == m_openInstance)
+                    closeDevice();
             }
         }
-        if (!m_sdlController && !m_sdlJoystick && SDL_NumJoysticks() > 0) {
-            if (SDL_IsGameController(0)) m_sdlController = SDL_GameControllerOpen(0);
-            else m_sdlJoystick = SDL_JoystickOpen(0);
+        if (listChanged) {
+            refreshDevices();
+            openSelected();
         }
         if (auto *gc = static_cast<SDL_GameController *>(m_sdlController)) {
             if (SDL_GameControllerGetAttached(gc)) {
@@ -503,7 +619,7 @@ void JoystickManager::poll()
                 connected = true;
                 name = QString::fromUtf8(SDL_JoystickName(js));
                 const int nb = SDL_JoystickNumButtons(js);
-                for (int i = 0; i < nb && i < 16; ++i) btns << (SDL_JoystickGetButton(js, i) != 0);
+                for (int i = 0; i < nb && i < 32; ++i) btns << (SDL_JoystickGetButton(js, i) != 0);
                 const int na = SDL_JoystickNumAxes(js);
                 for (int i = 0; i < 4 && i < na; ++i) a[i] = SDL_JoystickGetAxis(js, i) / 32767.0f;
                 if (SDL_JoystickNumHats(js) > 0) {
@@ -555,16 +671,21 @@ void JoystickManager::poll()
     // Map raw buttons onto the selected device type's input ids.
     QHash<QString, bool> now;
     const Type &t = type();
-    if (t.diagram == QLatin1String("pad")) {
+    const bool padLayout = t.diagram == QLatin1String("pad");
+    if (padLayout && isPad) {
         for (int i = 0; i < kPadButtons.size(); ++i) now.insert(kPadButtons.at(i), i < btns.size() && btns.at(i));
     } else {
-        for (int i = 0; i < t.realButtons.size(); ++i) now.insert(t.realButtons.at(i), i < btns.size() && btns.at(i));
-        if (t.buttons.contains(QStringLiteral("hatU"))) {
-            now.insert(QStringLiteral("hatU"), hat & 1);
-            now.insert(QStringLiteral("hatR"), hat & 2);
-            now.insert(QStringLiteral("hatD"), hat & 4);
-            now.insert(QStringLiteral("hatL"), hat & 8);
+        // A joystick, flight stick or HID device: buttons keep the device type's names where it
+        // has them (trigger, thumb, F1 ...) and are otherwise plain b1..bN by index, whichever
+        // diagram is selected; the first hat is hatU/R/D/L.
+        for (int i = 0; i < btns.size(); ++i) {
+            const QString name = (!padLayout && i < t.realButtons.size()) ? t.realButtons.at(i) : QStringLiteral("b%1").arg(i + 1);
+            now.insert(name, btns.at(i));
         }
+        now.insert(QStringLiteral("hatU"), hat & 1);
+        now.insert(QStringLiteral("hatR"), hat & 2);
+        now.insert(QStringLiteral("hatD"), hat & 4);
+        now.insert(QStringLiteral("hatL"), hat & 8);
     }
 
     bool axesChanged = false;

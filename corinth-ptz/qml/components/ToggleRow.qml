@@ -11,10 +11,12 @@ Button {
     property bool isOn: false
     property bool changed: false
     property bool warnWhenOn: false
+    property bool unknown: false      // state not read from the device: show the pill dimmed
     signal toggledByUser(bool value)
 
     implicitHeight: hint.length ? 52 : 44
     hoverEnabled: true
+    focusPolicy: Qt.TabFocus
     Accessible.role: Accessible.CheckBox
     Accessible.name: label
     Accessible.checked: isOn
@@ -40,7 +42,7 @@ Button {
                 Layout.fillWidth: true
             }
         }
-        SwitchPill { checked: tr.isOn }
+        SwitchPill { checked: tr.isOn; opacity: tr.unknown ? 0.4 : 1 }
     }
     background: Rectangle {
         radius: Theme.radiusControl

@@ -18,6 +18,7 @@ Rectangle {
     property var vals: ({})
     property var saved: ({})
     property var xmlCache: ({})
+    property var capsCache: ({})       // ep -> what the camera says it accepts (ONVIF cameras)
     property var readState: ({})      // ep -> "loading" | "ok" | "error: ..."
     property string confirmId: ""
     property string notice: ""
@@ -45,6 +46,52 @@ Rectangle {
     }
     readonly property bool needsRestart: changedIds.some(function (id) { return fieldIndex[id] && fieldIndex[id].field.restart })
 
+    // Channel the Video and Image pages edit: the one the live view shows.
+    readonly property var pathCtx: ({ vch: app.channel, ch: (app.profile && app.profile.channel) || 1 })
+    function hasOwn(o, k) { return !!o && Object.prototype.hasOwnProperty.call(o, k) }
+    // A field with the camera profile's overrides applied (profile.settings[id]) and
+    // its endpoint path resolved for the viewed channel. null in the profile unmaps it.
+    function eff(f) {
+        var ov = hasOwn(app.profile.settings, f.id) ? app.profile.settings[f.id] : undefined
+        var src = ov === null ? undefined : (ov !== undefined ? Object.assign({}, f.src || {}, ov) : f.src)
+        var unsupported = false
+        if (src) {
+            src = Object.assign({}, src)
+            src.ep = Schema.resolve(src.ep, pathCtx)
+            if (!app.settingsSupported(src.ep)) { unsupported = true; src = undefined }
+        }
+        return Object.assign({}, f, { src: src, unsupported: unsupported })
+    }
+    // The action behind a button: profile.actions[id] replaces the built-in one.
+    function actOf(f) {
+        var ov = hasOwn(app.profile.actions, f.id) ? app.profile.actions[f.id] : undefined
+        if (ov === null) return undefined
+        var a = ov !== undefined ? ov : f.act
+        if (a && typeof a === "object") { a = Object.assign({}, a); a.path = Schema.resolve(a.path, pathCtx) }
+        return a
+    }
+
+    readonly property string unsupportedText: app.driverKind === "RTSP only" ? "Not supported: this camera only supplies video"
+                                                                                : "Not supported over " + app.driverKind
+    readonly property string protocolBanner: app.driverKind === "RTSP only"
+        ? "This camera only supplies video, so its settings cannot be sent to it. Values you enter are kept on this laptop only."
+        : "This camera uses " + app.driverKind + ". Fields marked \"Not supported over " + app.driverKind + "\" are kept on this laptop only and are never sent to the camera."
+    readonly property bool nonIsapi: app.driverKind !== "ISAPI" && app.driverKind !== "Demo"
+    // true for a field this camera's protocol cannot read or write (so it is only kept on this laptop)
+    function isUnsupported(f) {
+        var e = eff(f)
+        if (e.unsupported) return true
+        return nonIsapi && !e.src && !e.local && currentPage.section.id !== "app" && ["text", "select", "slider", "toggle"].indexOf(f.type) >= 0
+    }
+    readonly property bool pageHasUnsupported: {
+        var pg = currentPage.page
+        for (var c = 0; c < pg.cards.length; ++c)
+            for (var f = 0; f < pg.cards[c].fields.length; ++f)
+                if (isUnsupported(pg.cards[c].fields[f])) return true
+        return false
+    }
+    readonly property var readErrors: Object.keys(readState).filter(function (k) { return String(readState[k]).indexOf("error") === 0 })
+
     function fmt(v) { return typeof v === "boolean" ? (v ? "on" : "off") : String(v) }
     function pageChanged(pid) { return changedIds.some(function (id) { return fieldIndex[id] && fieldIndex[id].page.id === pid }) }
     function sectionChanged(sec) { return sec.pages.some(function (p) { return root.pageChanged(p.id) }) }
@@ -65,6 +112,7 @@ Rectangle {
         vals = v
         saved = Object.assign({}, v)
         xmlCache = {}
+        capsCache = {}
         readState = {}
     }
 
@@ -79,10 +127,49 @@ Rectangle {
         var pg = pageFor(pageId).page   // not currentPage: it may not be re-evaluated yet
         for (var c = 0; c < pg.cards.length; ++c)
             for (var f = 0; f < pg.cards[c].fields.length; ++f) {
-                var fd = pg.cards[c].fields[f]
+                var fd = eff(pg.cards[c].fields[f])
                 if (fd.src) eps[fd.src.ep] = true
             }
         for (var ep in eps) readEndpoint(ep)
+        if (app.driverKind === "ONVIF")
+            for (var ep2 in eps) readCaps(ep2)
+    }
+    // The camera's own lists and ranges (ONVIF GetOptions), as <tag opt="a,b"/> and <tag min= max=/>.
+    function readCaps(ep) {
+        app.request("GET", ep + "/capabilities", "", function (ok, status, body) {
+            if (!ok) return
+            var c = Object.assign({}, root.capsCache); c[ep] = body; root.capsCache = c
+        })
+    }
+    // A select's menu, narrowed to the values the camera accepts (when it has told us).
+    function optsFor(f) {
+        var base = f.opts || []
+        var e = eff(f)
+        if (!e.src) return base
+        var caps = capsCache[e.src.ep]
+        if (!caps) return base
+        var m = new RegExp("<" + (e.src.res ? "videoResolution" : e.src.tag) + "\\b[^>]*\\bopt=\"([^\"]*)\"").exec(caps)
+        if (!m) return base
+        var allowed = m[1].split(",").map(function (s) { return s.trim().toLowerCase() })
+        var out = base.filter(function (label) {
+            var v = String(label)
+            if (!e.src.res) {
+                if (e.src.map && e.src.map[label] !== undefined) v = e.src.map[label]
+                else if (e.src.scale) v = String(Math.round(Number(label) * e.src.scale))
+            }
+            return allowed.indexOf(String(v).toLowerCase()) >= 0
+        })
+        return out.length ? out : base
+    }
+    // A slider's range, from the camera when it has told us.
+    function rangeOf(f, which) {
+        var dflt = which === "min" ? (f.min || 0) : (f.max || 100)
+        var e = eff(f)
+        if (!e.src || !e.src.tag) return dflt
+        var caps = capsCache[e.src.ep]
+        if (!caps) return dflt
+        var m = new RegExp("<" + e.src.tag + "\\b[^>]*\\b" + which + "=\"(-?\\d+)\"").exec(caps)
+        return m ? Number(m[1]) : dflt
     }
     function readEndpoint(ep) {
         var rs = Object.assign({}, readState); rs[ep] = "loading"; readState = rs
@@ -93,7 +180,7 @@ Rectangle {
             var cache = Object.assign({}, root.xmlCache); cache[ep] = body; root.xmlCache = cache
             var nv = Object.assign({}, root.vals), ns = Object.assign({}, root.saved)
             for (var id in root.fieldIndex) {
-                var fd = root.fieldIndex[id].field
+                var fd = root.eff(root.fieldIndex[id].field)
                 if (!fd.src || fd.src.ep !== ep) continue
                 var v = Schema.fromXml(fd, body)
                 if (v === null) continue
@@ -109,10 +196,10 @@ Rectangle {
     function apply() {
         var ids = changedIds.slice()
         if (!ids.length) return
-        var byEp = {}, localCount = 0, unmapped = []
+        var byEp = {}, localCount = 0, unmapped = [], anyUnsupported = false
         var ns = Object.assign({}, saved)
         for (var i = 0; i < ids.length; ++i) {
-            var ix = fieldIndex[ids[i]], f = ix.field
+            var ix = fieldIndex[ids[i]], f = eff(ix.field)
             if (f.src) {
                 (byEp[f.src.ep] = byEp[f.src.ep] || []).push(f)
             } else if (f.local) {
@@ -121,6 +208,7 @@ Rectangle {
                 ns[f.id] = vals[f.id]; localCount++
             } else {
                 unmapped.push(f.label)
+                if (isUnsupported(f)) anyUnsupported = true
                 ns[f.id] = vals[f.id]
             }
         }
@@ -132,7 +220,7 @@ Rectangle {
         if (unmapped.length) parts.push(unmapped.length + " not mapped to the camera yet (kept locally)")
         notice = parts.join(" · ")
         if (unmapped.length)
-            auditLog.add(ptz.operatorName, "Settings not sent · " + unmapped.join(", "), "Not mapped to an ISAPI endpoint yet", "warn")
+            auditLog.add(ptz.operatorName, "Settings not sent · " + unmapped.join(", "), anyUnsupported ? unsupportedText : "Not mapped to an ISAPI endpoint yet", "warn")
     }
     function writeEndpoint(ep, fields) {
         var base = xmlCache[ep]
@@ -164,12 +252,19 @@ Rectangle {
 
     function runAction(f) {
         if (f.type === "link") { root.openInput(); return }
-        if (!f.act) { notice = f.label.replace("…", "") + " · not mapped yet"; return }
+        var act = actOf(f)
+        if (!act) { notice = f.label.replace("…", "") + " · not mapped yet"; return }
         if (f.danger && confirmId !== f.id) { confirmId = f.id; return }
         confirmId = ""
-        if (f.act === "ptz.setHome") { ptz.setHome(); notice = "Home position set"; return }
-        if (f.act === "ptz.home") { ptz.home(); notice = "Going home"; return }
-        app.request(f.act.method, f.act.path, "", function (ok, status, body, ms) {
+        if (typeof act === "string" && act.indexOf("app.open:") === 0) {
+            app.openFolder(act.substr(9))
+            notice = "Opened " + app.folderPath(act.substr(9))
+            return
+        }
+        if (act === "ptz.setHome") { ptz.setHome(); notice = "Home position set"; return }
+        if (act === "ptz.home") { ptz.home(); notice = "Going home"; return }
+        if (ptz.locked) { notice = f.label.replace("…", "") + " · not sent: view only or link lost"; return }
+        app.request(act.method, act.path, act.body || "", function (ok, status, body, ms) {
             auditLog.add(ptz.operatorName, f.label, ok ? "Ack " + ms + " ms" : "Failed · HTTP " + status, ok ? "ok" : "crit")
             root.notice = f.label + (ok ? " · sent" : " · failed (HTTP " + status + ")")
         })
@@ -197,11 +292,12 @@ Rectangle {
     }
     onPageIdChanged: { confirmId = ""; loadPage() }
     Connections { target: app; function onActiveChanged() { root.initValues(); root.loadPage() } }
+    Connections { target: app; function onChannelChanged() { root.initValues(); root.loadPage() } }
     Component.onCompleted: initValues()
 
     function displayFound(item) {
         var id = app.saveCamera({ id: "found-" + item.ip, name: item.model + " " + item.ip.split(".").pop(), ip: item.ip,
-                                  proto: item.protos.indexOf("ISAPI") >= 0 ? "ISAPI" : "ONVIF", user: "admin", shown: true })
+                                  proto: item.protos.indexOf("ISAPI") >= 0 ? "ISAPI" : "ONVIF", user: item.protos.indexOf("ISAPI") >= 0 ? "admin" : "", httpPort: item.port || 80, shown: true })
         toast = { kind: "added", title: "Camera added", detail: item.ip + " is in the live view list. Add its password with Edit before use." }
         toastTimer.restart()
         return id
@@ -338,21 +434,41 @@ Rectangle {
                             visible: root.currentPage.page.ep.length > 0
                             radius: 8; color: Theme.pageS2; border.width: 1; border.color: Theme.pageBorder
                             implicitWidth: epText.implicitWidth + 20; implicitHeight: 30
-                            Mono { id: epText; anchors.centerIn: parent; onPage: true; color: Theme.pageText2; font.pixelSize: 11; text: "Writes " + root.currentPage.page.ep }
+                            Mono { id: epText; anchors.centerIn: parent; onPage: true; color: Theme.pageText2; font.pixelSize: 11; text: "Writes " + Schema.resolve(root.currentPage.page.ep, root.pathCtx) }
+                        }
+                        Seg {
+                            visible: app.hasChannel2 && ["video", "image"].indexOf(root.currentPage.section.id) >= 0
+                            onPage: true; small: true
+                            model: [{ id: "1", label: "Visible" }, { id: "2", label: "Thermal" }]
+                            current: String(app.channel)
+                            onPicked: (id) => app.channel = parseInt(id)
                         }
                         Btn { visible: root.currentPage.page.ep.length > 0; onPage: true; compact: true; text: "Refresh from camera"; onClicked: root.loadPage() }
                     }
 
-                    // read errors
-                    Repeater {
-                        model: Object.keys(root.readState).filter(function (k) { return String(root.readState[k]).indexOf("error") === 0 })
-                        delegate: Rectangle {
-                            required property string modelData
-                            Layout.fillWidth: true
-                            implicitHeight: errText.implicitHeight + 16
-                            radius: 8; color: Theme.critSoft; border.width: 1; border.color: Theme.crit
-                            Text { id: errText; anchors.fill: parent; anchors.margins: 8; wrapMode: Text.WordWrap; color: Theme.pageText; font.pixelSize: 12
-                                text: "Could not read " + modelData + " · " + root.readState[modelData] + ". Fields from it show defaults and will not be sent." }
+                    // one banner instead of an error per page that this protocol cannot serve
+                    Rectangle {
+                        visible: root.pageHasUnsupported && root.pageId !== "cameras" && root.pageId !== "tester"
+                        Layout.fillWidth: true
+                        implicitHeight: protoText.implicitHeight + 16
+                        radius: 8; color: Theme.accentSoft; border.width: 1; border.color: Theme.accent
+                        Text { id: protoText; anchors.fill: parent; anchors.margins: 8; wrapMode: Text.WordWrap; color: Theme.pageText; font.pixelSize: 12; text: root.protocolBanner }
+                    }
+
+                    // read errors: one box for the page, not one per endpoint
+                    Rectangle {
+                        visible: root.readErrors.length > 0
+                        Layout.fillWidth: true
+                        implicitHeight: errText.implicitHeight + 16
+                        radius: 8; color: Theme.critSoft; border.width: 1; border.color: Theme.crit
+                        Text {
+                            id: errText
+                            anchors.fill: parent; anchors.margins: 8; wrapMode: Text.WordWrap; color: Theme.pageText; font.pixelSize: 12
+                            text: root.readErrors.length === 0 ? ""
+                                  : root.readErrors.length === 1
+                                    ? "Could not read " + root.readErrors[0] + " · " + root.readState[root.readErrors[0]] + ". Its fields show defaults and will not be sent."
+                                    : "Could not read " + root.readErrors.length + " settings from the camera · " + root.readState[root.readErrors[0]]
+                                      + ". Their fields show defaults and will not be sent. Check the camera is reachable, then press Refresh from camera."
                         }
                     }
 
@@ -363,8 +479,14 @@ Rectangle {
                         onDisplayFound: (item) => root.displayFound(item)
                     }
 
+                    EndpointTester {
+                        objectName: "endpointTester"
+                        visible: root.pageId === "tester"
+                        Layout.fillWidth: true
+                    }
+
                     GridLayout {
-                        visible: root.pageId !== "cameras"
+                        visible: root.pageId !== "cameras" && root.pageId !== "tester"
                         Layout.fillWidth: true
                         columns: width > 760 ? 2 : 1
                         columnSpacing: 16
@@ -390,7 +512,7 @@ Rectangle {
                                             readonly property var f: modelData
                                             readonly property var v: root.vals[f.id]
                                             readonly property bool changed: f.val !== undefined && String(root.vals[f.id]) !== String(root.saved[f.id])
-                                            readonly property bool unmapped: !f.src && !f.local && root.currentPage.section.id !== "app" && ["text", "select", "slider", "toggle"].indexOf(f.type) >= 0
+                                            readonly property bool unmapped: !root.eff(f).src && !f.local && root.currentPage.section.id !== "app" && ["text", "select", "slider", "toggle"].indexOf(f.type) >= 0
                                             Layout.fillWidth: true
                                             spacing: 4
 
@@ -408,8 +530,8 @@ Rectangle {
                                                 visible: fieldBox.f.type === "slider"
                                                 Layout.fillWidth: true
                                                 label: fieldBox.f.label
-                                                from: fieldBox.f.min || 0
-                                                to: fieldBox.f.max || 100
+                                                from: root.rangeOf(fieldBox.f, "min")
+                                                to: root.rangeOf(fieldBox.f, "max")
                                                 unit: fieldBox.f.unit || ""
                                                 value: Number(fieldBox.v) || 0
                                                 changed: fieldBox.changed
@@ -419,7 +541,7 @@ Rectangle {
                                                 visible: fieldBox.f.type === "select"
                                                 Layout.fillWidth: true
                                                 label: fieldBox.f.label
-                                                model: fieldBox.f.opts || []
+                                                model: root.optsFor(fieldBox.f)
                                                 value: String(fieldBox.v)
                                                 changed: fieldBox.changed
                                                 restart: !!fieldBox.f.restart
@@ -429,6 +551,7 @@ Rectangle {
                                                 visible: fieldBox.f.type === "text"
                                                 Layout.fillWidth: true
                                                 label: fieldBox.f.label
+                                                password: !!fieldBox.f.secret
                                                 value: fieldBox.v === undefined ? "" : String(fieldBox.v)
                                                 changed: fieldBox.changed
                                                 restart: !!fieldBox.f.restart
@@ -477,7 +600,7 @@ Rectangle {
                                             }
                                             Text {
                                                 visible: fieldBox.unmapped
-                                                text: "Not mapped to the camera yet"
+                                                text: root.isUnsupported(fieldBox.f) ? root.unsupportedText : "Not mapped to the camera yet"
                                                 color: Theme.text2
                                                 font.pixelSize: 11
                                                 font.italic: true
@@ -485,6 +608,43 @@ Rectangle {
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+
+                    Card {
+                        visible: root.pageId === "teamctl"
+                        Layout.fillWidth: true
+                        implicitHeight: teamCol.implicitHeight + 40
+                        ColumnLayout {
+                            id: teamCol
+                            anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+                            anchors.margins: 20
+                            spacing: 10
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Lbl { text: "Status · " + (app.activeCamera.name || "no camera"); color: Theme.text; font.pixelSize: 13; Layout.fillWidth: true }
+                                Lbl { text: control.enabled ? control.state : "off"; color: control.mine ? Theme.good : Theme.text2; font.pixelSize: 11 }
+                            }
+                            Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; color: Theme.text2; font.pixelSize: 12; text: control.status }
+                            Repeater {
+                                model: control.operators
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    Layout.fillWidth: true
+                                    implicitHeight: 38; radius: 8; color: Theme.s2
+                                    RowLayout {
+                                        anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
+                                        Dot { color: modelData.role === "in control" ? Theme.good : Theme.text2 }
+                                        Text { text: modelData.name + (modelData.me ? "  (this laptop)" : ""); color: Theme.text; font.pixelSize: 13; font.weight: Font.Medium; Layout.fillWidth: true }
+                                        Text { text: modelData.host; color: Theme.text2; font.pixelSize: 12 }
+                                        Text { text: modelData.role; color: modelData.role === "in control" ? Theme.good : Theme.text2; font.pixelSize: 12 }
+                                    }
+                                }
+                            }
+                            Text {
+                                Layout.fillWidth: true; wrapMode: Text.WordWrap; color: Theme.text2; font.pixelSize: 11
+                                text: "Messages are signed with the team key; anything unsigned or signed with another key is ignored. Hand-over is by request; Take over is the override for a holder who does not answer. Changes to the key, peers or port apply when you press Apply."
                             }
                         }
                     }

@@ -1,0 +1,125 @@
+{
+  "_help": "Built-in camera profile (Hikvision ISAPI). Do not edit this copy: put changes in %APPDATA%\\Corinth\\Corinth PTZ\\profiles\\default.json (all cameras) or <cameraId>.json (one camera). Entries there override these key by key; null removes one. Placeholders: {ch} PTZ channel, {vch} viewed channel (1 visible, 2 thermal), {id} preset, {pan} {tilt} {zoom}, {speed}, {name}, {state}, {x1} {y1} {x2} {y2}.",
+
+  "channel": 1,
+  "channels": 2,
+
+  "ping": { "method": "GET", "path": "/ISAPI/System/deviceInfo" },
+
+  "stream": { "url": "rtsp://{ip}:{rtspPort}/Streaming/Channels/{channel}0{n}" },
+
+  "ptz": {
+    "continuous": {
+      "method": "PUT",
+      "path": "/ISAPI/PTZCtrl/channels/{ch}/continuous",
+      "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><PTZData><pan>{pan}</pan><tilt>{tilt}</tilt><zoom>{zoom}</zoom></PTZData>"
+    },
+    "gotoPreset": {
+      "method": "PUT",
+      "path": "/ISAPI/PTZCtrl/channels/{ch}/presets/{id}/goto"
+    },
+    "setPreset": {
+      "method": "PUT",
+      "path": "/ISAPI/PTZCtrl/channels/{ch}/presets/{id}",
+      "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><PTZPreset><id>{id}</id><presetName>{name}</presetName></PTZPreset>"
+    },
+    "listPresets": { "method": "GET", "path": "/ISAPI/PTZCtrl/channels/{ch}/presets" },
+    "getPreset": { "method": "GET", "path": "/ISAPI/PTZCtrl/channels/{ch}/presets/{id}" },
+    "renamePreset": {
+      "method": "PUT",
+      "path": "/ISAPI/PTZCtrl/channels/{ch}/presets/{id}",
+      "nameTag": "presetName"
+    },
+    "gotoHome": { "method": "PUT", "path": "/ISAPI/PTZCtrl/channels/{ch}/homeposition/goto" },
+    "setHome": { "method": "PUT", "path": "/ISAPI/PTZCtrl/channels/{ch}/homeposition" },
+    "focus": {
+      "method": "PUT",
+      "path": "/ISAPI/System/Video/inputs/channels/{ch}/focus",
+      "body": "<FocusData><focus>{speed}</focus></FocusData>"
+    },
+    "iris": {
+      "method": "PUT",
+      "path": "/ISAPI/System/Video/inputs/channels/{ch}/iris",
+      "body": "<IrisData><iris>{speed}</iris></IrisData>"
+    },
+    "onePushFocus": { "method": "PUT", "path": "/ISAPI/PTZCtrl/channels/{ch}/onepushfoucs/start" },
+    "point": {
+      "method": "PUT",
+      "path": "/ISAPI/PTZCtrl/channels/{ch}/position3D",
+      "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Position3D><StartPoint><positionX>{x1}</positionX><positionY>{y1}</positionY></StartPoint><EndPoint><positionX>{x2}</positionX><positionY>{y2}</positionY></EndPoint></Position3D>",
+      "scale": 255,
+      "flipY": false
+    },
+    "absoluteZoom": {
+      "method": "PUT",
+      "path": "/ISAPI/PTZCtrl/channels/{ch}/absolute",
+      "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><PTZData><AbsoluteHigh><elevation>{el}</elevation><azimuth>{az}</azimuth><absoluteZoom>{zoom}</absoluteZoom></AbsoluteHigh></PTZData>"
+    },
+    "status": {
+      "method": "GET",
+      "path": "/ISAPI/PTZCtrl/channels/{ch}/status",
+      "azimuth": "azimuth",
+      "elevation": "elevation",
+      "zoom": "absoluteZoom",
+      "divisor": 10
+    }
+  },
+
+  "aux": {
+    "stab": { "order": 1, "label": "Stabilisation" },
+    "lock": { "order": 2, "label": "Heading lock" },
+    "wiper": {
+      "order": 3,
+      "label": "Wiper",
+      "on": "on",
+      "off": "off",
+      "set": {
+        "method": "PUT",
+        "path": "/ISAPI/PTZCtrl/channels/{ch}/auxcontrols/1",
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><PTZAux><id>1</id><type>WIPER</type><status>{state}</status></PTZAux>"
+      },
+      "get": {
+        "method": "GET",
+        "path": "/ISAPI/PTZCtrl/channels/{ch}/auxcontrols",
+        "tag": "status",
+        "matchTag": "type",
+        "matchValue": "WIPER"
+      }
+    },
+    "heater": { "order": 4, "label": "Heater / defog" },
+    "ir": {
+      "order": 5,
+      "label": "IR light",
+      "on": "on",
+      "off": "off",
+      "set": {
+        "method": "PUT",
+        "path": "/ISAPI/PTZCtrl/channels/{ch}/auxcontrols/1",
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><PTZAux><id>1</id><type>LIGHT</type><status>{state}</status></PTZAux>"
+      },
+      "get": {
+        "method": "GET",
+        "path": "/ISAPI/PTZCtrl/channels/{ch}/auxcontrols",
+        "tag": "status",
+        "matchTag": "type",
+        "matchValue": "LIGHT"
+      }
+    }
+  },
+
+  "health": {
+    "uptime": { "order": 1, "label": "Uptime", "ep": "/ISAPI/System/status", "tag": "deviceUpTime", "format": "duration" },
+    "cpu": { "order": 2, "label": "CPU load", "ep": "/ISAPI/System/status", "tag": "cpuUtilization", "unit": " %", "warnAbove": 85, "critAbove": 95 },
+    "mem": { "order": 3, "label": "Memory used", "ep": "/ISAPI/System/status", "tag": "memoryUsage", "unit": " MB" },
+    "sd": { "order": 4, "label": "SD card", "ep": "/ISAPI/ContentMgmt/Storage", "tag": "status", "okValues": ["ok", "normal", "idle"], "badLevel": "warn" },
+    "sdFree": { "order": 5, "label": "SD free", "ep": "/ISAPI/ContentMgmt/Storage", "tag": "freeSpace", "unit": " MB", "warnBelow": 1024, "critBelow": 128 }
+  },
+
+  "image": {
+    "color": "/ISAPI/Image/channels/{vch}/color",
+    "ircut": "/ISAPI/Image/channels/{vch}/IrcutFilter"
+  },
+
+  "settings": {},
+  "actions": {}
+}

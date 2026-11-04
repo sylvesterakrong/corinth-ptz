@@ -103,6 +103,76 @@ Rectangle {
                 width: Math.min(parent.width - 48, 1400)
                 spacing: 16
 
+                // ---------- detected devices ----------
+                Card {
+                    Layout.fillWidth: true
+                    implicitHeight: devCol.implicitHeight + 32
+                    ColumnLayout {
+                        id: devCol
+                        anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+                        anchors.margins: 16
+                        anchors.leftMargin: 20; anchors.rightMargin: 20
+                        spacing: 10
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 12
+                            Lbl { text: "Detected devices"; color: Theme.text; font.pixelSize: 13; Layout.fillWidth: true }
+                            Text { text: joystick.devices.length + (joystick.devices.length === 1 ? " device" : " devices"); color: Theme.text2; font.pixelSize: 12 }
+                            Btn {
+                                visible: joystick.connected && joystick.suggestedType.length > 0 && joystick.suggestedType !== joystick.deviceType
+                                variant: "primary"; compact: true
+                                text: "Use detected type"
+                                onClicked: { root.stopListen(); joystick.useSuggestedType(); root.notice = "Device type set to match " + joystick.deviceName; root.noticeWarn = false }
+                            }
+                        }
+                        Repeater {
+                            model: joystick.devices
+                            delegate: Btn {
+                                required property var modelData
+                                readonly property bool inUse: modelData.guid === joystick.selectedGuid
+                                Layout.fillWidth: true
+                                implicitHeight: 56
+                                variant: "toggle"
+                                on: inUse
+                                text: ""
+                                Accessible.name: modelData.name
+                                Accessible.role: Accessible.RadioButton
+                                onClicked: { root.stopListen(); joystick.selectDevice(modelData.guid); root.notice = "" }
+                                contentItem: RowLayout {
+                                    spacing: 12
+                                    Dot { color: inUse ? Theme.good : Theme.text2; Layout.alignment: Qt.AlignVCenter }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 2
+                                        Text { text: modelData.name; color: Theme.text; font.pixelSize: 13; font.weight: Font.DemiBold; elide: Text.ElideRight; Layout.fillWidth: true }
+                                        Mono { text: modelData.axes + " axes · " + modelData.buttons + " buttons · " + modelData.hats + (modelData.hats === 1 ? " hat" : " hats"); color: Theme.text2; font.pixelSize: 11 }
+                                    }
+                                    Lbl { text: modelData.gamepad ? "Gamepad" : "Joystick"; color: Theme.text2; font.pixelSize: 11 }
+                                    Lbl { visible: inUse; text: "In use"; color: Theme.good; font.pixelSize: 11 }
+                                }
+                            }
+                        }
+                        Text {
+                            visible: joystick.devices.length === 0
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            color: Theme.text2
+                            font.pixelSize: 12
+                            text: joystick.backend === "SDL2"
+                                  ? "No joystick found. Plug one in: it appears here at once, no restart needed."
+                                  : "This build has no SDL2, so only Xbox-compatible gamepads are seen. Rebuild with SDL2 (it is downloaded automatically) for every other joystick."
+                        }
+                        Text {
+                            visible: joystick.devices.length > 1
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            color: Theme.text2
+                            font.pixelSize: 11
+                            text: "Pick the one that drives the camera. It is remembered, and used again whenever it is plugged in."
+                        }
+                    }
+                }
+
                 // ---------- device type ----------
                 Card {
                     Layout.fillWidth: true

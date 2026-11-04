@@ -36,6 +36,11 @@ class JoystickManager : public QObject
     Q_PROPERTY(QVariantList axes READ axes NOTIFY stateChanged)
     Q_PROPERTY(QVariantMap pressed READ pressed NOTIFY stateChanged)
     Q_PROPERTY(bool listening READ listening WRITE setListening NOTIFY listeningChanged)
+    Q_PROPERTY(QVariantList devices READ devices NOTIFY devicesChanged)   // [{ guid, name, axes, buttons, hats, gamepad }]
+    Q_PROPERTY(QString selectedGuid READ selectedGuid NOTIFY deviceChanged)
+    Q_PROPERTY(int axisCount READ axisCount NOTIFY deviceChanged)
+    Q_PROPERTY(int buttonCount READ buttonCount NOTIFY deviceChanged)
+    Q_PROPERTY(int hatCount READ hatCount NOTIFY deviceChanged)
 
 public:
     explicit JoystickManager(QObject *parent = nullptr);
@@ -62,6 +67,17 @@ public:
     QVariantMap pressed() const;
     bool listening() const { return m_listening; }
     void setListening(bool l);
+    QVariantList devices() const { return m_devices; }
+    QString selectedGuid() const { return m_openGuid; }
+    int axisCount() const { return m_axisCount; }
+    int buttonCount() const { return m_buttonCount; }
+    int hatCount() const { return m_hatCount; }
+
+    // Choose which attached device drives the app; remembered by GUID, so it is
+    // picked again whenever it is plugged back in.
+    Q_INVOKABLE void selectDevice(const QString &guid);
+    // Switch the device type (and so the diagram and bindings) to the detected one.
+    Q_INVOKABLE void useSuggestedType();
 
     // Returns a notice for the UI. Prefix "?" = rejected (keep listening),
     // "!" = bound with a warning ("Snapshot → A · Record now unassigned"),
@@ -80,6 +96,7 @@ signals:
     void configChanged();
     void stateChanged();
     void listeningChanged();
+    void devicesChanged();
     void rawInput(const QString &input);
     void actionPressed(const QString &action);
     void actionReleased(const QString &action);
@@ -98,6 +115,9 @@ private:
     void load();
     void save();
     void poll();
+    void refreshDevices();
+    void openSelected();
+    void closeDevice();
     void handleInputs(const QHash<QString, bool> &now);
     QString actionFor(const QString &input) const;
 
@@ -123,4 +143,9 @@ private:
     void *m_sdlController = nullptr;
     void *m_sdlJoystick = nullptr;
     bool m_sdlReady = false;
+    QVariantList m_devices;
+    QString m_wantGuid;      // the device the user picked (saved)
+    QString m_openGuid;      // the device that is open now
+    int m_openInstance = -1;
+    int m_axisCount = 0, m_buttonCount = 0, m_hatCount = 0;
 };

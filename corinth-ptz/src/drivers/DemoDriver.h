@@ -2,11 +2,13 @@
 
 #include "CameraDriver.h"
 #include <QHash>
+#include <QMap>
 
 class QTimer;
 
 // Simulated PTZ camera so the whole app can be used without hardware.
-// Movement, presets, command latency and the Settings XML pages all respond.
+// Movement, presets, aux switches, command latency and the Settings XML pages
+// all respond. It reads the same camera profile as the ISAPI driver.
 class DemoDriver : public CameraDriver
 {
     Q_OBJECT
@@ -30,8 +32,20 @@ public:
     void request(const QString &method, const QString &path, const QByteArray &body,
                  HttpCallback cb) override;
 
+    bool supportsZoomLevel() const override { return true; }
+    void setZoomLevel(double times, const QString &label) override;
+    bool supportsPoint() const override { return true; }
+    bool supportsBoxZoom() const override { return true; }
+    bool supportsPresetRename() const override { return true; }
+    void pointAt(double nx, double ny, const QString &label) override;
+    void boxZoom(double x1, double y1, double x2, double y2, const QString &label) override;
+    void renamePreset(int id, const QString &name, const QString &label) override;
+    void queryPresets() override;
+    void queryAux() override;
+    QVariantList auxItems() const override { return profileAuxItems(); }
+
 private:
-    void ack(const QString &label);
+    void ack(const QString &label, bool changesPresets = false);
     int latency() const;
     void tick();
 
@@ -40,7 +54,11 @@ private:
     int m_vPan = 0, m_vTilt = 0, m_vZoom = 0;
     bool m_hasTarget = false;
     double m_tAz = 0, m_tEl = 0;
-    QHash<int, QPair<double, double>> m_presets;
+    bool m_hasZoomTarget = false;
+    double m_tZoom = 1;
+    QMap<int, QPair<double, double>> m_presets;
+    QMap<int, QString> m_presetNames;
+    QHash<QString, bool> m_aux;
     QPair<double, double> m_home{0, 0};
     QHash<QString, QByteArray> m_docs;
 };
@@ -53,6 +71,7 @@ public:
     explicit RtspOnlyDriver(const CameraConfig &cfg, QObject *parent = nullptr);
     QString kind() const override { return QStringLiteral("RTSP only"); }
     bool hasPtz() const override { return false; }
+    bool supportsSettingsEndpoint(const QString &) const override { return false; }
 
     void continuousMove(int, int, int, const QString &label) override { fail(label); }
     void gotoPreset(int, const QString &label) override { fail(label); }

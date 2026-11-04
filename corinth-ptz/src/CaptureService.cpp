@@ -1,6 +1,7 @@
 #include "CaptureService.h"
 #include "AuditLog.h"
 
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
@@ -17,7 +18,10 @@
 CaptureService::CaptureService(AuditLog *log, QObject *parent)
     : QObject(parent), m_log(log)
 {
-    m_ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    // The copy shipped next to the app first, then whatever is on PATH.
+    m_ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"), {QCoreApplication::applicationDirPath()});
+    if (m_ffmpeg.isEmpty())
+        m_ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
 }
 
 CaptureService::~CaptureService()
