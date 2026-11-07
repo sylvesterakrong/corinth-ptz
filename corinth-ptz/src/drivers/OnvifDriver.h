@@ -102,4 +102,5 @@ private:
     QHash<int, QString> m_presetTokens;
     bool m_initRunning = false;
     bool m_statusInFlight = false;
+    double m_ptX = 0, m_ptY = 0; bool m_ptKnown = false;   // last reported pan/tilt (ONVIF -1..1), re-sent with an absolute zoom
 };

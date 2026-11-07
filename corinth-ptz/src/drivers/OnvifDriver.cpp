@@ -451,9 +451,13 @@ namespace { constexpr double kMaxZoomTimes = 40.0; }
 void OnvifDriver::setZoomLevel(double times, const QString &label)
 {
     const double x = qBound(0.0, (times - 1.0) / (kMaxZoomTimes - 1.0), 1.0);
-    ptzCommand(QStringLiteral("<AbsoluteMove xmlns=\"%1\"><ProfileToken>%2</ProfileToken><Position>"
+    // Send the current pan and tilt along with the zoom: some cameras read a missing PanTilt as "centre".
+    const QString pt = m_ptKnown
+        ? QStringLiteral("<PanTilt xmlns=\"%1\" x=\"%2\" y=\"%3\"/>").arg(QLatin1String(kSchemaNs)).arg(m_ptX, 0, 'f', 4).arg(m_ptY, 0, 'f', 4)
+        : QString();
+    ptzCommand(QStringLiteral("<AbsoluteMove xmlns=\"%1\"><ProfileToken>%2</ProfileToken><Position>%5"
                               "<Zoom xmlns=\"%3\" x=\"%4\"/></Position></AbsoluteMove>")
-                   .arg(QLatin1String(kPtzNs), ptzToken(), QLatin1String(kSchemaNs)).arg(x, 0, 'f', 4), label);
+                   .arg(QLatin1String(kPtzNs), ptzToken(), QLatin1String(kSchemaNs)).arg(x, 0, 'f', 4).arg(pt), label);
 }
 
 void OnvifDriver::pointAt(double nx, double ny, const QString &label)
@@ -541,6 +545,7 @@ void OnvifDriver::queryStatus()
              // ONVIF reports a normalised space (-1..1). Converting to degrees
              // needs the camera's space limits, so these are approximate.
              const double x = m.captured(1).toDouble(), y = m.captured(2).toDouble();
+             m_ptX = x; m_ptY = y; m_ptKnown = true;
              // Zoom position, when the camera reports one, back to a magnification (see setZoomLevel).
              double zoomTimes = -1.0;
              const QRegularExpression zr(QStringLiteral("<(?:\\w+:)?Position>.*?<(?:\\w+:)?Zoom[^>]*\\sx=\"([-0-9.eE]+)\""),

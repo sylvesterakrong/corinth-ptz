@@ -403,8 +403,8 @@ static void testOnvif()
     result(QStringLiteral("zoomlevel"));
     const int iAbs = cam.indexOf(QStringLiteral("/onvif/ptz"), QStringLiteral("<AbsoluteMove"));
     const QString absBody = iAbs >= 0 ? QString::fromUtf8(cam.log.at(iAbs).body) : QString();
-    check(iAbs >= 0 && absBody.contains(QLatin1String("x=\"0.5128\"")) && !absBody.contains(QLatin1String("PanTilt")),
-          QStringLiteral("zoom level 21x is an AbsoluteMove with only a zoom position (0.5128), so pan and tilt are left alone"));
+    check(iAbs >= 0 && absBody.contains(QLatin1String("x=\"0.5128\"")) && absBody.contains(QLatin1String("x=\"0.5000\" y=\"0.2500\"")),
+          QStringLiteral("zoom level 21x is an AbsoluteMove to zoom position 0.5128 that re-sends the current pan and tilt (0.5, 0.25)"));
 
     // click to point
     d.pointAt(0.75, 0.4, QStringLiteral("point"));

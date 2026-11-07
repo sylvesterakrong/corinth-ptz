@@ -590,22 +590,8 @@ Rectangle {
             anchors.rightMargin: 24
             spacing: 10
 
-            // brand
-            Item {
-                implicitWidth: 26; implicitHeight: 26
-                Rectangle { anchors.centerIn: parent; width: 20; height: 20; radius: 10; color: "transparent"; border.width: 1.6; border.color: Theme.pageAccent }
-                Rectangle { anchors.centerIn: parent; width: 6; height: 6; radius: 3; color: "transparent"; border.width: 1.6; border.color: Theme.pageAccent }
-                Rectangle { anchors.horizontalCenter: parent.horizontalCenter; y: 0; width: 1.6; height: 5; color: Theme.pageAccent }
-                Rectangle { anchors.horizontalCenter: parent.horizontalCenter; y: 21; width: 1.6; height: 5; color: Theme.pageAccent }
-                Rectangle { anchors.verticalCenter: parent.verticalCenter; x: 0; width: 5; height: 1.6; color: Theme.pageAccent }
-                Rectangle { anchors.verticalCenter: parent.verticalCenter; x: 21; width: 5; height: 1.6; color: Theme.pageAccent }
-            }
-            ColumnLayout {
-                visible: !root.tinyHeader
-                spacing: 0
-                Lbl { text: "Corinth PTZ"; onPage: true; color: Theme.pageText; font.pixelSize: 16; font.letterSpacing: 3.2 }
-                Lbl { text: "Atlantis USV · Camera control"; onPage: true; font.pixelSize: 11 }
-            }
+            // brand: just the name
+            Lbl { text: "Corinth PTZ"; onPage: true; color: Theme.pageText; font.pixelSize: 16; font.letterSpacing: 3.2 }
             Item { implicitWidth: 6 }
 
             ComboBox {
@@ -750,6 +736,8 @@ Rectangle {
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: root.railOpen ? 18 : 10
+            anchors.leftMargin: root.railOpen ? 18 : 6      // collapsed: buttons span the card with an even inset
+            anchors.rightMargin: root.railOpen ? 18 : 6
             spacing: 8
 
             RowLayout {
@@ -760,8 +748,10 @@ Rectangle {
                 Btn {
                     text: root.railOpen ? "‹" : "›"
                     variant: root.railOpen ? "ghost" : "soft"
-                    implicitWidth: root.railOpen ? 30 : 44
+                    implicitWidth: root.railOpen ? 30 : 64
                     implicitHeight: root.railOpen ? 30 : 40
+                    
+                    Layout.fillWidth: !root.railOpen
                     Layout.alignment: Qt.AlignHCenter
                     onClicked: root.railOpen = !root.railOpen
                     Accessible.name: root.railOpen ? "Collapse camera list" : "Expand camera list"
@@ -773,6 +763,7 @@ Rectangle {
                     required property var modelData
                     Layout.fillWidth: true
                     Layout.preferredHeight: root.railOpen ? 50 : 44
+                    
                     variant: "toggle"
                     on: modelData.id === app.activeId
                     text: ""
@@ -780,6 +771,7 @@ Rectangle {
                     Accessible.name: modelData.name
                     contentItem: RowLayout {
                         spacing: 10
+                        Item { visible: !root.railOpen; Layout.fillWidth: true }
                         Dot { color: modelData.id === app.activeId && root.linkLost ? Theme.text2 : Theme.good; Layout.alignment: Qt.AlignVCenter }
                         ColumnLayout {
                             visible: root.railOpen
@@ -789,6 +781,7 @@ Rectangle {
                             Text { text: modelData.proto + (modelData.proto === "Demo" ? "" : " · " + modelData.ip); color: Theme.text2; font.pixelSize: 11; elide: Text.ElideRight; Layout.fillWidth: true }
                         }
                         Mono { visible: !root.railOpen; text: modelData.name.substr(0, 3); font.pixelSize: 11 }
+                        Item { visible: !root.railOpen; Layout.fillWidth: true }
                     }
                 }
             }
@@ -909,16 +902,17 @@ Rectangle {
             visible: !root.panelOpen
             anchors.fill: parent
             anchors.margins: 10
+            anchors.leftMargin: 6; anchors.rightMargin: 6     // buttons span the card with an even inset
             spacing: 10
-            Btn { text: "‹"; implicitWidth: 44; implicitHeight: 40; Layout.alignment: Qt.AlignHCenter; onClicked: root.panelOpen = true; Accessible.name: "Expand control panel" }
-            Rectangle { Layout.alignment: Qt.AlignHCenter; width: 28; height: 1; color: Theme.border }
+            Btn { text: "‹"; implicitWidth: 64; implicitHeight: 40; Layout.fillWidth: true; onClicked: root.panelOpen = true; Accessible.name: "Expand control panel" }
+            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
             Repeater {
                 model: [{ id: "ptz", g: "✥", n: "PTZ" }, { id: "image", g: "☀", n: "Image" }, { id: "presets", g: "⚑", n: "Presets" }, { id: "aux", g: "≡", n: "Aux" }, { id: "health", g: "♥", n: "Health" }, { id: "log", g: "☰", n: "Log" }]
                 delegate: Btn {
                     required property var modelData
-                    Layout.alignment: Qt.AlignHCenter
-                    implicitWidth: 44; implicitHeight: 44
-                    variant: "ghost"; text: modelData.g
+                    Layout.fillWidth: true
+                    implicitWidth: 64; implicitHeight: 44
+                    variant: "toggle"; on: root.tab === modelData.id; text: modelData.g
                     onClicked: { root.tab = modelData.id; root.panelOpen = true }
                     Accessible.name: modelData.n
                     ToolTip.visible: hovered; ToolTip.text: modelData.n
